@@ -1,0 +1,183 @@
+<?php
+// $Id:
+
+/**
+ * @file
+ * Glue module for the FOGO.org site
+ */
+
+/*
+ * Description of roles used on the GarfieldOrchestra.org site:
+ *
+ *    - board member: Allows access to the board-only part of the site (currently NYI).
+ *    - money admin: Can create/edit/delete invoices, credit accounts, etc.
+ *    - user admin: Can create/edit/delete accounts and Student/Parent records.  "user admin" roles
+ *          is needed to associate parents with students and visa versa
+ *    - writer: Can create/edit/delete blog entries, news and regular pages on the site
+ */
+
+
+function fogo_init() {
+  // Add FOGO JS file so we can tweak attributes on the form
+  drupal_add_js(drupal_get_path('module', 'fogo') . '/fogo.js');
+}
+
+/**
+ * Implements hook_perm()
+ *
+ * Exposes the following permissions:
+ *
+ *    - administer student invoices: create/edit/delete invoices associated with each student
+ *    - administer students/parents: create/edit/delete relationships between students and parents,
+ *          edit student fields such as instrument chair and orchestra group
+ */
+function fogo_permissions() {
+  return array(
+    'administer student invoices',
+    'administer students/parents',
+    'debug email notices',
+  );
+}
+
+function fogo_menu() {
+  $items = array();
+
+  $items['admin/settings/fogo'] = array(
+    'title' => 'Garfield Orchestra Settings',
+    'description' => 'Settings specific to the Garfield Orchestra site',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('fogo_settings_form'),
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'fogo.pages.inc',
+  );
+
+  return $items;
+}
+
+function fogo_form_alter(&$form, &$form_state, $form_id) {
+}
+
+// TODO:
+function fogo_user_insert(&$edit, &$account, $category = NULL) {
+  // Ensure new registrants the role of "Parent"
+  // $roles = user_roles();
+  // $edit['roles'][4] = $roles[4];
+}
+
+function fogo_node_insert($node) {
+  if ('email' == $node->type) {
+    _fogo_send_notices($node, 'created');
+  }
+}
+
+function fogo_node_update($node) {
+  if ('email' == $node->type) {
+    _fogo_send_notices($node, 'updated');
+  }
+}
+
+
+/*
+ * Helper functions
+ */
+
+
+/**
+ * Sends notification messages for $node.
+ * @param $node
+ * @param $action - one of 'created' or 'updated' based on the node action that caused this routine to be called
+ */
+function _fogo_send_notices($notice, $action) {
+
+  if (!empty($notice->field_notice_skip_sending[0]['value'])) {
+    return;
+  }
+
+  $emails = array();        // List of all email address to send this notice to
+  $to_parents = FALSE;      // Send to parents?
+  $to_students = FALSE;     // Send to students?
+
+  foreach ($notice->field_notice_group as $group) {
+    if ('parents' == $group['value']) {
+      $to_parents = TRUE;
+    }
+    if ('students' == $group['value']) {
+      $to_students = TRUE;
+    }
+  }
+
+  // MUSTFIX:
+  $sql = "SELECT DISTINCT n.nid FROM {node} n INNER JOIN {term_node} tn ON n.vid = tn.vid WHERE n.type='%s' AND tn.tid = %d";
+  foreach ($notice->field_notice_class as $item) {
+    $class_tid = $item['value'];
+    if ($to_students) {
+      // Get a list of all students in this class
+      $results = db_query($sql, 'student', $class_tid);
+      while ($row = db_fetch_object($results)) {
+        $node = node_load($row->nid);
+        foreach ($node->field_email as $email) {
+          if (!empty($email['email'])) {
+            $emails[] = $email['email'];
+          }
+        }
+      }
+    }
+    if ($to_parents) {
+      // Grab their Parent profile emails
+      $results = db_query($sql, 'parent', $class_tid);
+      while ($row = db_fetch_object($results)) {
+        $node = node_load($row->nid);
+        foreach ($node->field_email as $email) {
+          if (!empty($email['email'])) {
+            $emails[] = $email['email'];
+          }
+        }
+
+        // Also grab their primary email associated with their user account
+        $user = user_load($node->uid);
+        $emails[] = $user->mail;
+      }
+    }
+  }
+  $emails = array_unique($emails);
+
+  // DEBUG:
+//  $emails = array('info@mikekeran.com');
+//  dsm($notice);
+//  $emails = array_fill(0, 5, 'info@mikekeran.com');
+
+  // Build message
+  // TODO: make configurable
+  // TODO: allow token replacements
+  // TODO: Add greeting
+  $message = new stdClass();
+  if ('created' == $action) {
+    $message->subject = $notice->title;
+  }
+  else {
+    $message->subject = 'UPDATED: ' . $notice->title;
+  }
+  $message->body['content'] = $notice->body;
+
+  // Add footer
+  $footer = '<hr />
+    <p>The <a href="http://GarfieldOrchestra.org">Friends of Garfield Orchestra</a> (FOGO) is a 501(c)(3)
+    non-profit run by volunteer parents working to support the orchestra music programs at Garfield High School.
+    This email is generated automatically by the FOGO Web site based on your subscription preferences.</p>
+    <p>If you are receiving this email in error, please contact the
+    <a href="mailto:webmaster@garfieldorchestra.org">FOGO webmaster</a></p>';
+  $message->body['content'] .= $footer;
+
+  // Send via AWS SES -- have aws_mail_send_email report errors to the user
+  aws_mail_send_email($emails, $message->subject, $message->body['content'], NULL, NULL, TRUE);
+}
+
+
+/*
+ * Test function
+ */
+function fogo_test() {
+  dpr('in test');
+  exit;
+}

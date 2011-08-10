@@ -1,0 +1,5 @@
+; $Id:
+name = Glue module
+description = Custom glue for the FOGO.org site
+core = 7.x
+package = FOGO
