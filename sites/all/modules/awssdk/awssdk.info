@@ -1,0 +1,12 @@
+name = AWS SDK for PHP
+description = The AWS SDK for PHP provides a library, code samples, and documentation for developers.
+package = Libraries
+core = 7.x
+dependencies[] = libraries
+
+; Information added by drupal.org packaging script on 2011-08-05
+version = "7.x-4.0"
+core = "7.x"
+project = "awssdk"
+datestamp = "1312517218"
+
