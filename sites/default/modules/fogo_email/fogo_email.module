@@ -1,0 +1,150 @@
+<?php
+/**
+ * @file
+ * Provides primary Drupal hook implementations.
+ *
+ * @author Mike Keran ("mikeker", http://drupal.org/user/192273)
+ */
+
+/**
+ * Implements hook_perm()
+ *
+ * Exposes the following permissions:
+ *
+ *    - debug email notices: for future use
+ */
+function fogo_email_permissions() {
+  return array(
+    'debug email notices',
+  );
+}
+
+/**
+ * Implements hook_FORM_NAME_form_alter.
+ */
+function fogo_email_form_email_notice_node_form_alter(&$form, &$form_state) {
+  if (empty($form['nid']['#value'])) {
+    // Always send email when first creating a new notice
+    $form['field_no_email_on_update']['#access'] = FALSE;
+  }
+  else {
+    // Otherwise, default to NOT sending emails on edits
+    $form['field_no_email_on_update']['und']['#default_value'] = 1;
+  }
+
+  // Add our submit handler to the mix
+  $form['#submit'][] = 'fogo_email_send_bulk';
+
+  // dsm($form);
+  // dsm($form_state);
+}
+
+function fogo_email_form_alter(&$form, &$form_state, $form_id) {
+  // dsm($form_id);
+  // dsm($form);
+}
+
+
+
+/******************************************************************************
+ *
+ * Helper function
+ *
+ *****************************************************************************/
+function fogo_email_send_bulk($form, &$form_state) {
+  $vals = $form_state['values'];
+
+  if ($vals['field_no_email_on_update']['und'][0]['value']) {
+    // Don't send emails for this update
+    return;
+  }
+  if ('Save' != $vals['op']) {
+    return;
+  }
+
+  // TODO: Collect email addresses based on the orchestra and parent/student selections
+
+  // DEBUG:
+  $emails = array(
+    array('email' => 'info@mikekeran.com', 'firstname' => 'Mike'),
+    array('email' => 'info@mikekeran.com', 'firstname' => 'Mike2'),
+    array('email' => 'info@mikekeran.com', 'firstname' => 'Mike3'),
+    array('email' => 'info@mikekeran.com', 'firstname' => 'Mike4'),
+    array('email' => 'info@mikekeran.com', 'firstname' => 'Mike5'),
+  );
+
+  // Assemeble message
+  $message = $vals['field_email_body']['und'][0]['value'];
+  $footer = variable_get('fogo_email_footer', '');
+  if (!empty($footer)) {
+    $message .= '<hr />' . $footer;
+  }
+
+  // Create a Batch to send the emails
+  // TODO: parallelize based on MaxSendRate
+  $batch = array(
+    'title' => t('Sending emails'),
+    'operations' => array(),
+    'finished' => 'fogo_email_batch_finished',
+  );
+  $batch_emails = array();
+  $batch_texts = array();
+  $num_in_batch = 2;    // TODO: set to maxsendrate
+
+  // Build batch commands in groups of num_in_batch emails
+  for ($i = 0; $i < count($emails); $i++) {
+    $batch_texts[] = '<p>Hello ' . $emails[$i]['firstname'] . '</p>' . $message;
+    $batch_emails[] = $emails[$i]['email'];
+    dsm("i is $i and mod is " . $i % $num_in_batch);
+    if (!($i % $num_in_batch)) {
+      $batch['operations'][] = array(
+        'fogo_email_send',
+        array($batch_emails, $batch_texts)
+      );
+      $batch_emails = $batch_texts = array();
+    }
+  }
+  batch_set($batch);
+}
+
+/**
+ * Sends emails in one call to AmazonSES.  It is up to the calling routine to
+ * properly divvy up the messages so as not to exceed this accounts MaxSendRate
+ */
+function fogo_email_send($emails, $texts, &$context) {
+  // Normalize inputs
+  if (!is_array($emails)) {
+    $emails = array($emails);
+  }
+  if (!is_array($texts)) {
+    $texts = array($texts);
+  }
+
+  foreach ($emails as $index => $email) {
+    watchdog(
+      'FOGO email',
+      'Sending email to !email: !message',
+      array('!email' => $email, '!message' => $texts[$index])
+    );
+
+    $context['results'][] = array(
+      'success' => TRUE,
+      'message' => t('Email sent to %email', array('%email' => $email)),
+    );
+  }
+}
+
+function fogo_email_batch_finished($success, $results, $operations) {
+  if ($success) {
+    drupal_set_message(format_plural(count($results), 'One email processed.', '@count emails processed.'));
+  }
+  else {
+    drupal_set_message('There were errors send this email. Please report this to the webmaster.');
+  }
+
+  foreach ($results as $result) {
+    if (!$result['success']) {
+      drupal_set_message($result['message']);
+    }
+  }
+}

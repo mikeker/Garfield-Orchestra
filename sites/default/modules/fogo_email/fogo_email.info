@@ -1,0 +1,6 @@
+name = FOGO Bulk Emailer
+description = Uses Amazon's SES service to send bulk emails for the FOGO website
+package = FOGO
+core = 7.x
+dependencies[] = awssdk
+

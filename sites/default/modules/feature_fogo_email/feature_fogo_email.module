@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the Feature: FOGO Email feature.
+ */
+
+include_once('feature_fogo_email.features.inc');
